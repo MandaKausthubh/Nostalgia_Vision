@@ -81,6 +81,10 @@ def hydra_entry(cfg: DictConfig):
         callbacks=cb_list,
         log_every_n_steps=cfg.train.log_every_n_steps,
         val_check_interval=cfg.train.val_check_interval,
+        enable_progress_bar=True,
+        # Reduce tqdm flicker
+        enable_model_summary=False,
+        num_sanity_val_steps=getattr(cfg.train, 'num_sanity_val_steps', 0),
     )
 
     # Multi-task loop
