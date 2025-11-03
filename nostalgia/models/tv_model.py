@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 import torch
+import torch.nn as nn
 import pytorch_lightning as pl
 from torchvision import models
 from torchmetrics.classification import Accuracy
@@ -29,15 +30,32 @@ class LitTorchvisionClassifier(pl.LightningModule):
         else:
             raise ValueError(arch)
         in_feat = net.fc.in_features
-        net.fc = torch.nn.Linear(in_feat, num_labels)
-        self.model = net
+        net.fc = nn.Identity()
+        self.backbone = net
+        self.feature_dim = in_feat
+        self.heads = nn.ModuleDict()
+        self.active_task = None
+        self.add_task_head('default', num_labels)
+        self.set_active_task('default')
+
         self.criterion = torch.nn.CrossEntropyLoss()
         self.train_acc = Accuracy(task="multiclass", num_classes=num_labels)
         self.val_acc = Accuracy(task="multiclass", num_classes=num_labels)
 
+    def add_task_head(self, task_id: str, num_labels: int):
+        if task_id not in self.heads:
+            self.heads[task_id] = nn.Linear(self.feature_dim, num_labels)
+
+    def set_active_task(self, task_id: str):
+        if task_id not in self.heads:
+            raise ValueError(f"Unknown task head: {task_id}")
+        self.active_task = task_id
+
     def forward(self, x):
-        logits = self.model(x)
-        return torch.nn.functional.softmax(logits, dim=1) if self.training is False else logits
+        feats = self.backbone(x)
+        head = self.heads[self.active_task]
+        logits = head(feats)
+        return logits
 
     def configure_optimizers(self):
         opt = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
@@ -45,7 +63,7 @@ class LitTorchvisionClassifier(pl.LightningModule):
 
     def _step(self, batch, stage: str):
         x, y = batch
-        logits = self.model(x)
+        logits = self(x)
         loss = self.criterion(logits, y)
         pred = torch.argmax(logits, dim=1)
         acc = self.train_acc(pred, y) if stage == "train" else self.val_acc(pred, y)

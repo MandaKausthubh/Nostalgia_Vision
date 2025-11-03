@@ -89,7 +89,15 @@ def hydra_entry(cfg: DictConfig):
     per_task_acc = []
 
     for t in range(1, num_tasks + 1):
-        print(f"=== Task {t}/{num_tasks} ===")
+        task_id = f"task{t}"
+        print(f"=== Task {t}/{num_tasks} ({task_id}) ===")
+        # ensure per-task head exists and is active
+        if hasattr(model, 'add_task_head'):
+            # assume same num_classes for now; pass cfg.dataset.num_classes or provide per-task config
+            model.add_task_head(task_id, cfg.dataset.num_classes)
+            model.set_active_task(task_id)
+
+        # Only project backbone params (exclude heads)
         if t == 1 or not cfg.nostalgia.enabled or t < cfg.nostalgia.projection_start_task:
             nostalgia_cb.clear_basis()
         trainer.fit(model, train_loader, val_loader)
@@ -99,20 +107,22 @@ def hydra_entry(cfg: DictConfig):
         acc = float(val_metrics.get('val/acc', 0.0))
         per_task_acc.append(acc)
 
-        # After task t: compute/update basis using hessian-eigenthings
+        # After task t: compute/update basis using hessian-eigenthings over backbone only
         def loss_fn(batch):
             x, y = batch
-            out = model(x)
-            logits = out.logits
+            logits = model(x)
             return model.criterion(logits, y)
 
         try:
-            evals, evecs_flat = topk_eigs_with_eigenthings(model.model,
+            backbone = model.backbone if hasattr(model, 'backbone') else model.model
+            evals, evecs_flat = topk_eigs_with_eigenthings(backbone,
                                                            lambda m, b: loss_fn(b),
                                                            train_loader,
                                                            num_eigenthings=cfg.nostalgia.top_k,
                                                            use_gpu=True)
-            basis = build_param_basis(model.model, evecs_flat)
+            basis = build_param_basis(backbone, evecs_flat)
+            # Filter to LoRA/backbone params only (exclude heads)
+            basis = {k: v for k, v in basis.items() if 'head' not in k and 'heads' not in k}
             if cfg.nostalgia.project_params == 'lora-only':
                 basis = {k: v for k, v in basis.items() if 'lora' in k}
             nostalgia_cb.set_basis(basis)
