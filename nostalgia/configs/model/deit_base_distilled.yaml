@@ -1,0 +1,9 @@
+model_id: facebook/deit-base-distilled-patch16-224
+framework: hf
+num_labels: ${dataset.num_classes}
+use_lora: true
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: ["query","key","value","output.dense"]

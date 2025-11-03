@@ -1,0 +1,3 @@
+use_wandb: false
+save_dir: ${experiment.output_dir}
+name: ${experiment.name}

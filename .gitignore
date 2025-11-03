@@ -1,1 +1,8 @@
 CVPR_Submission.pdf
+.DS_Store
+.pytest_cache
+tests/__pycache__/
+__pycache__/
+.vscode/
+EXPERIMENT_PLAN.md
+NOSTALGIA_ALGORITHM.md

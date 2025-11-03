@@ -1,0 +1,4 @@
+arch: resnet50
+framework: torchvision
+num_labels: ${dataset.num_classes}
+use_lora: false

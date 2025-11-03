@@ -1,0 +1,9 @@
+name: cifar100
+source: torchvision
+root: data/cifar100
+train_split: train
+val_split: test
+num_classes: 100
+image_size: 224
+batch_size: 128
+num_workers: 8

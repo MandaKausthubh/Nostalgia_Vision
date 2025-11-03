@@ -1,0 +1,7 @@
+enabled: true
+projection_start_task: 2
+hessian_backend: hessian-eigenthings
+top_k: 32
+ema: 0.1
+refresh_steps: 500
+project_params: lora-only

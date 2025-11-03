@@ -1,0 +1,20 @@
+defaults:
+  - dataset: cifar100
+  - model: vit
+  - train: default
+  - nostalgia: default
+  - logger: tensorboard
+  - hydra: default
+
+experiment:
+  name: exp_vit_cifar100
+  seed: 0
+  num_tasks: 2
+  output_dir: ${oc.env:OUTPUT_DIR, runs}/${experiment.name}
+
+hydra:
+  run:
+    dir: ${experiment.output_dir}/${now:%Y-%m-%d_%H-%M-%S}
+  job_logging:
+    version: 1
+
