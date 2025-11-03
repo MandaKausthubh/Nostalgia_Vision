@@ -4,7 +4,7 @@ defaults:
   - train: default
   - nostalgia: default
   - logger: tensorboard
-  - hydra: config
+  - _self_
 
 experiment:
   name: exp_vit_cifar100
