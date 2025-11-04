@@ -16,6 +16,7 @@ from nostalgia.models.tv_model import LitTorchvisionClassifier
 from nostalgia.nostalgia_callback import NostalgiaGradProjector
 from nostalgia.lanczos import topk_eigs_with_eigenthings, build_param_basis
 from nostalgia.scripts.plot_all import main as plot_main
+from nostalgia.scripts.plot_all import run_plots
 
 
 def _build_loaders(cfg: DictConfig):
@@ -65,7 +66,18 @@ def hydra_entry(cfg: DictConfig):
     train_loader, val_loader = _build_loaders(cfg)
 
     # Logging & callbacks
-    loggers, cb_list = build_loggers(cfg.logger.save_dir, cfg.logger.name)
+    # Support Weights & Biases via config flags
+    logger_cfg = getattr(cfg, 'logger', {})
+    loggers, cb_list = build_loggers(
+        logger_cfg.get('save_dir', cfg.experiment.output_dir),
+        logger_cfg.get('name', cfg.experiment.name),
+        use_wandb=logger_cfg.get('use_wandb', False),
+        project=logger_cfg.get('project', None),
+        entity=logger_cfg.get('entity', None),
+        tags=logger_cfg.get('tags', None),
+        group=logger_cfg.get('group', None),
+        mode=logger_cfg.get('mode', None),
+    )
     mem_cb = MemoryComputeLogger(os.path.join(cfg.experiment.output_dir, 'logs', 'memory.csv'))
     cb_list.append(mem_cb)
 
@@ -142,19 +154,19 @@ def hydra_entry(cfg: DictConfig):
 
     # Generate plots
     # CSV logs reside under logger save_dir/name/version/*.csv
-    # Try to find the most recent metrics.csv
     log_root = os.path.join(cfg.logger.save_dir, cfg.logger.name)
-    latest_version = sorted(os.listdir(log_root))[-1]
-    csv_dir = os.path.join(log_root, latest_version)
-    metrics_csv = os.path.join(csv_dir, 'metrics.csv')
+    metrics_csv = None
+    try:
+        latest_version = sorted(os.listdir(log_root))[-1]
+        csv_dir = os.path.join(log_root, latest_version)
+        maybe_csv = os.path.join(csv_dir, 'metrics.csv')
+        if os.path.exists(maybe_csv):
+            metrics_csv = maybe_csv
+    except Exception:
+        pass
     mem_csv = os.path.join(cfg.experiment.output_dir, 'logs', 'memory.csv')
 
-    argv = [
-        '--results_dir', results_dir,
-        '--log_csv', metrics_csv,
-        '--mem_csv', mem_csv,
-    ]
-    plot_main()  # will parse sys.argv; acceptable for simple CLI
+    run_plots(results_dir, metrics_csv, mem_csv)
 
 
 def main():

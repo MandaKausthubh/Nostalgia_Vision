@@ -39,17 +39,40 @@ class LitTorchvisionClassifier(pl.LightningModule):
         self.set_active_task('default')
 
         self.criterion = torch.nn.CrossEntropyLoss()
-        self.train_acc = Accuracy(task="multiclass", num_classes=num_labels)
-        self.val_acc = Accuracy(task="multiclass", num_classes=num_labels)
+        self.train_acc: Optional[Accuracy] = None
+        self.val_acc: Optional[Accuracy] = None
+        self._reset_metrics_for_head(num_labels)
+
+    def _reset_metrics_for_head(self, num_labels: int):
+        self.train_acc = Accuracy(task="multiclass", num_classes=num_labels).to(self.device)
+        self.val_acc = Accuracy(task="multiclass", num_classes=num_labels).to(self.device)
 
     def add_task_head(self, task_id: str, num_labels: int):
         if task_id not in self.heads:
             self.heads[task_id] = nn.Linear(self.feature_dim, num_labels)
 
+    def expand_task_head(self, task_id: str, new_num_labels: int):
+        if task_id not in self.heads:
+            self.heads[task_id] = nn.Linear(self.feature_dim, new_num_labels)
+            return
+        head = self.heads[task_id]
+        old_out = head.out_features
+        if new_num_labels <= old_out:
+            return
+        new_head = nn.Linear(self.feature_dim, new_num_labels)
+        with torch.no_grad():
+            new_head.weight[:old_out].copy_(head.weight)
+            if head.bias is not None and new_head.bias is not None:
+                new_head.bias[:old_out].copy_(head.bias)
+        self.heads[task_id] = new_head
+        if self.active_task == task_id:
+            self._reset_metrics_for_head(new_num_labels)
+
     def set_active_task(self, task_id: str):
         if task_id not in self.heads:
             raise ValueError(f"Unknown task head: {task_id}")
         self.active_task = task_id
+        self._reset_metrics_for_head(self.heads[task_id].out_features)
 
     def forward(self, x):
         feats = self.backbone(x)
