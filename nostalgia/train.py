@@ -2,6 +2,7 @@ import os
 from typing import Dict
 import argparse
 import json
+import re
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import pytorch_lightning as pl
@@ -18,6 +19,26 @@ from nostalgia.nostalgia_callback import NostalgiaGradProjector
 from nostalgia.lanczos import topk_eigs_with_eigenthings, build_param_basis
 from nostalgia.scripts.plot_all import main as plot_main
 from nostalgia.scripts.plot_all import run_plots
+
+# Register resolvers at import time so Hydra can use them in config interpolation
+try:
+    OmegaConf.register_new_resolver(
+        "join",
+        lambda xs, sep='-': sep.join(str(x) for x in (xs or [])) if isinstance(xs, (list, tuple)) else str(xs),
+        replace=True,
+    )
+    OmegaConf.register_new_resolver(
+        "slug",
+        lambda s: re.sub(r"[^A-Za-z0-9]+", "-", str(s)).strip("-").lower() if s is not None else "",
+        replace=True,
+    )
+    OmegaConf.register_new_resolver(
+        "coalesce",
+        lambda *args: next((a for a in args if a not in (None, "", "null")), ""),
+        replace=True,
+    )
+except Exception:
+    pass
 
 
 def _build_loaders(cfg: DictConfig):
