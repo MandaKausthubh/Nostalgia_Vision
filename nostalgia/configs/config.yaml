@@ -10,6 +10,12 @@ experiment:
   name: exp_vit_cifar100
   seed: 0
   num_tasks: 2
+  # If provided, overrides num_tasks and defines the dataset sequence per task
+  # Example sequences (uncomment and override from CLI as needed):
+  # tasks: [cifar100, tinyimagenet, caltech256]
+  # tasks: [imagenet100, imagenet-r, imagenet-a]
+  # tasks: [cifar100, cub200, flowers102]
+  # tasks: [cifar10, mnist]
   output_dir: ${oc.env:OUTPUT_DIR, runs}/${experiment.name}
 
 hydra:

@@ -11,6 +11,7 @@ from nostalgia.utils.seed import set_seed
 from nostalgia.utils.logging import build_loggers
 from nostalgia.utils.memory import MemoryComputeLogger
 from nostalgia.data_utils.datasets import get_cifar100, get_caltech256, get_imagenet1k
+from nostalgia.data_utils.datasets import get_loaders_and_num_classes
 from nostalgia.models.hf_model import LitHFClassifier
 from nostalgia.models.tv_model import LitTorchvisionClassifier
 from nostalgia.nostalgia_callback import NostalgiaGradProjector
@@ -62,11 +63,17 @@ def hydra_entry(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     set_seed(cfg.experiment.seed)
 
-    # Build data and model
-    train_loader, val_loader = _build_loaders(cfg)
+    # Multi-task sequences configuration
+    # If cfg.experiment.tasks is provided, use that list of dataset names in order;
+    # else, repeat cfg.dataset.name for num_tasks times (backward compatibility).
+    tasks = list(getattr(cfg.experiment, 'tasks', []))
+    if not tasks:
+        tasks = [cfg.dataset.name for _ in range(cfg.experiment.get('num_tasks', 2))]
 
-    # Logging & callbacks
-    # Support Weights & Biases via config flags
+    # Build model once; heads will be added per dataset
+    model = _build_model(cfg)
+
+    # Logging & callbacks (unchanged)
     logger_cfg = getattr(cfg, 'logger', {})
     loggers, cb_list = build_loggers(
         logger_cfg.get('save_dir', cfg.experiment.output_dir),
@@ -94,36 +101,46 @@ def hydra_entry(cfg: DictConfig):
         log_every_n_steps=cfg.train.log_every_n_steps,
         val_check_interval=cfg.train.val_check_interval,
         enable_progress_bar=True,
-        # Reduce tqdm flicker
         enable_model_summary=False,
         num_sanity_val_steps=getattr(cfg.train, 'num_sanity_val_steps', 0),
     )
 
-    # Multi-task loop
-    num_tasks = cfg.experiment.get("num_tasks", 2)
-    model = _build_model(cfg)
     per_task_acc = []
 
-    for t in range(1, num_tasks + 1):
-        task_id = f"task{t}"
-        print(f"=== Task {t}/{num_tasks} ({task_id}) ===")
-        # ensure per-task head exists and is active
+    for idx, ds_name in enumerate(tasks, start=1):
+        task_id = f"task{idx}_{ds_name.lower()}"
+        print(f"=== Task {idx}/{len(tasks)}: {ds_name} ===")
+
+        # Build loaders for this dataset (HF first, TV fallback)
+        framework = cfg.model.get("framework", "hf")
+        model_id = cfg.model.model_id if framework == 'hf' else None
+        train_loader, val_loader, n_classes = get_loaders_and_num_classes(
+            ds_name, cfg.dataset.root, model_id, cfg.dataset.image_size, cfg.dataset.batch_size, cfg.dataset.num_workers
+        )
+
+        # Add/switch head for this dataset (support expanding head if reusing same task id)
         if hasattr(model, 'add_task_head'):
-            # assume same num_classes for now; pass cfg.dataset.num_classes or provide per-task config
-            model.add_task_head(task_id, cfg.dataset.num_classes)
+            if hasattr(model, 'expand_task_head'):
+                # Create if missing, else expand in case the new dataset has more classes
+                model.add_task_head(task_id, n_classes)
+                model.expand_task_head(task_id, n_classes)
+            else:
+                model.add_task_head(task_id, n_classes)
             model.set_active_task(task_id)
 
-        # Only project backbone params (exclude heads)
-        if t == 1 or not cfg.nostalgia.enabled or t < cfg.nostalgia.projection_start_task:
+        # First task or before projection start: clear nostalgia basis
+        if idx == 1 or not cfg.nostalgia.enabled or idx < cfg.nostalgia.projection_start_task:
             nostalgia_cb.clear_basis()
+
+        # Fit on this dataset
         trainer.fit(model, train_loader, val_loader)
 
-        # Record validation accuracy at the end of task t
+        # Record validation accuracy
         val_metrics = trainer.callback_metrics
         acc = float(val_metrics.get('val/acc', 0.0))
         per_task_acc.append(acc)
 
-        # After task t: compute/update basis using hessian-eigenthings over backbone only
+        # Update basis from current dataset on backbone only
         def loss_fn(batch):
             x, y = batch
             logits = model(x)
@@ -131,13 +148,14 @@ def hydra_entry(cfg: DictConfig):
 
         try:
             backbone = model.backbone if hasattr(model, 'backbone') else model.model
-            evals, evecs_flat = topk_eigs_with_eigenthings(backbone,
-                                                           lambda m, b: loss_fn(b),
-                                                           train_loader,
-                                                           num_eigenthings=cfg.nostalgia.top_k,
-                                                           use_gpu=True)
+            evals, evecs_flat = topk_eigs_with_eigenthings(
+                backbone,
+                lambda m, b: loss_fn(b),
+                train_loader,
+                num_eigenthings=cfg.nostalgia.top_k,
+                use_gpu=True,
+            )
             basis = build_param_basis(backbone, evecs_flat)
-            # Filter to LoRA/backbone params only (exclude heads)
             basis = {k: v for k, v in basis.items() if 'head' not in k and 'heads' not in k}
             if cfg.nostalgia.project_params == 'lora-only':
                 basis = {k: v for k, v in basis.items() if 'lora' in k}
@@ -146,14 +164,12 @@ def hydra_entry(cfg: DictConfig):
             print(f"Warning: Hessian eigenthings failed ({e}); continuing without projection.")
             nostalgia_cb.clear_basis()
 
-    # Save per-task accuracies
+    # Save results and plots (unchanged)
     results_dir = os.path.join(cfg.experiment.output_dir, 'results')
     os.makedirs(results_dir, exist_ok=True)
     with open(os.path.join(results_dir, 'per_task_acc.json'), 'w') as f:
         json.dump(per_task_acc, f)
 
-    # Generate plots
-    # CSV logs reside under logger save_dir/name/version/*.csv
     log_root = os.path.join(cfg.logger.save_dir, cfg.logger.name)
     metrics_csv = None
     try:
