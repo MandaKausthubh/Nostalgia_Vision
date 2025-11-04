@@ -16,6 +16,7 @@ Requirements: Python 3.10+, CUDA recommended.
 ```bash
 # Create/activate your env, then
 pip install -r requirements.txt
+pip install --upgrade git+https://github.com/noahgolmant/pytorch-hessian-eigenthings.git@master#egg=hessian-eigenthings
 # Optional: for W&B
 wandb login
 ```
