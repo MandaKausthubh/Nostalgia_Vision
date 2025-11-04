@@ -23,12 +23,23 @@ wandb login
 
 ## Datasets
 
-- CIFAR-10/100 and CalTech-256 auto-download to `dataset.root`.
-- ImageNet-1K expects an ImageFolder:
-  - `${root}/train/class_x/*.JPEG`, `${root}/val/class_x/*.JPEG`
-- TinyImageNet, ImageNet-100, ImageNet-R, ImageNet-A: also ImageFolder with `train/` and `val/` splits.
+This project prefers Hugging Face Datasets when available, with torchvision/ImageFolder fallbacks.
 
-Configure locations via Hydra, e.g. `dataset.root=/data/imagenet`.
+- HF auto-downloads to `~/.cache/huggingface` (set `HF_HOME` to change).
+- Torchvision auto-downloads to `dataset.root` where supported.
+- ImageFolder fallback expects:
+  - `${root}/train/class_x/*` and `${root}/val/class_x/*`
+
+Common dataset keys used in sequences:
+
+- cifar10, cifar100 (HF + torchvision)
+- tinyimagenet (HF: `Maysee/tiny-imagenet`, else ImageFolder)
+- caltech256 (HF and torchvision)
+- cub200 (HF: `caltech_birds2011`)
+- flowers102 (HF: `oxford_flowers102`)
+- imagenet100, imagenet-r, imagenet-a (HF may vary; ImageFolder fallback recommended)
+
+Configure locations via Hydra, e.g. `dataset.root=/data`.
 
 ## Quickstart
 
@@ -58,6 +69,49 @@ python -m nostalgia.train dataset=imagenet1k dataset.root=/data/imagenet \
   model=vit train.epochs=30
 ```
 
+## Experiment suites (multi-dataset sequences)
+
+Set the ordered list of datasets via `experiment.tasks=[...]`. Each entry becomes one training task with its own classifier head; the backbone is shared and nostalgia projection starts from task 2 (configurable).
+
+- Main: CIFAR-100 → TinyImageNet → CalTech-256
+
+```bash
+python -m nostalgia.train experiment.name=main_seq \
+  experiment.tasks=[cifar100,tinyimagenet,caltech256] \
+  model=vit dataset.root=/data
+```
+
+- Robustness: ImageNet-100 → ImageNet-R → ImageNet-A
+
+```bash
+# HF-first; otherwise point to ImageFolder trees under /data/robust/<dataset>/{train,val}
+python -m nostalgia.train experiment.name=robust_seq \
+  experiment.tasks=[imagenet100,imagenet-r,imagenet-a] \
+  model=vit dataset.root=/data/robust
+```
+
+- Fine-grained: CIFAR-100 → CUB-200 → Flowers-102
+
+```bash
+python -m nostalgia.train experiment.name=fine_seq \
+  experiment.tasks=[cifar100,cub200,flowers102] \
+  model=vit dataset.root=/data
+```
+
+- Ablations (toy): CIFAR-10 → MNIST
+
+```bash
+python -m nostalgia.train experiment.name=abl_seq \
+  experiment.tasks=[cifar10,mnist] \
+  model=vit dataset.root=/data
+```
+
+Notes:
+
+- You can swap models (e.g., `model.framework=torchvision model.arch=resnet50`).
+- Each task runs `train.epochs` (default 50). Adjust with `train.epochs=<N>`.
+- When HF lacks a dataset, the loader falls back to torchvision or ImageFolder.
+
 ## Live logging (TensorBoard and W&B)
 
 TensorBoard is on by default and logs under `${experiment.output_dir}`.
@@ -70,7 +124,7 @@ tensorboard --logdir runs
 Enable Weights & Biases for live dashboards:
 
 ```bash
-python -m nostalgia.train dataset=cifar100 model=vit experiment.num_tasks=2 \
+python -m nostalgia.train experiment.tasks=[cifar100,tinyimagenet,caltech256] model=vit \
   logger.use_wandb=true logger.project=nostalgia logger.entity=YOUR_ENTITY
 ```
 
@@ -107,11 +161,9 @@ Print the composed config at runtime to verify overrides.
 
 ## Continual Learning
 
-- Per-task heads are created automatically: `task1`, `task2`, ...
+- Per-task heads are created automatically and named with dataset: `task1_<ds>`, `task2_<ds>`, ...
 - First task: no projection; subsequent tasks: gradients are projected onto the complement of top-k Hessian eigendirections of the backbone.
-- Projection scope can be limited to LoRA parameters (set in config).
-
-Current release trains multiple tasks on the same dataset; multi-dataset task sequences are being staged (loaders for CIFAR-10, TinyImageNet, ImageNet-100/R/A are included).
+- Projection scope can be limited to LoRA parameters (set in config via `nostalgia.project_params`).
 
 ## Tests
 
