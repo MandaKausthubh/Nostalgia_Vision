@@ -10,7 +10,7 @@ experiment:
   name: exp_vit_cifar100
   seed: 0
   num_tasks: 2
-  # If provided, overrides num_tasks and defines the dataset sequence per task
+  tasks: []  # list of dataset names for multi-task sequences (override from CLI)
   # Example sequences (uncomment and override from CLI as needed):
   # tasks: [cifar100, tinyimagenet, caltech256]
   # tasks: [imagenet100, imagenet-r, imagenet-a]
