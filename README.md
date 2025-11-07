@@ -56,6 +56,13 @@ python -m nostalgia.train dataset=cifar100 model=vit experiment.num_tasks=2 \
   train.epochs=20 dataset.batch_size=128
 ```
 
+- Use different epochs for each task:
+
+```bash
+python -m nostalgia.train dataset=cifar100 model=vit experiment.num_tasks=3 \
+  train.epochs_per_task=[10,20,30]
+```
+
 Use a Torchvision backbone (ResNet-18):
 
 ```bash
@@ -109,7 +116,12 @@ python -m nostalgia.train experiment.name=abl_seq \
 Notes:
 
 - You can swap models (e.g., `model.framework=torchvision model.arch=resnet50`).
-- Each task runs `train.epochs` (default 50). Adjust with `train.epochs=<N>`.
+- Each task runs `train.epochs` (default 50) unless overridden with `train.epochs_per_task=[e1,e2,...]`.
+- Example with different epochs per task:
+  ```bash
+  python -m nostalgia.train experiment.tasks=[cifar100,tinyimagenet,caltech256] \
+    train.epochs_per_task=[30,40,50] model=vit
+  ```
 - When HF lacks a dataset, the loader falls back to torchvision or ImageFolder.
 
 ## Live logging (TensorBoard and W&B)
@@ -173,7 +185,8 @@ pytest -q
 
 ## Tips
 
-- Change epochs: `train.epochs=<N>` (applies per task)
+- Change epochs: `train.epochs=<N>` (applies per task as default)
+- Per-task epochs: `train.epochs_per_task=[10,20,30]` (different epochs for each task; falls back to `train.epochs` if not specified or list is shorter than number of tasks)
 - Mixed precision: `train.precision=16` (default)
 - Devices: `train.accelerator=gpu train.devices=1`
 - Reproducibility: `experiment.seed=<int>`
