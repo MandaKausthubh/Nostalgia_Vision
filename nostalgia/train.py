@@ -112,25 +112,29 @@ def hydra_entry(cfg: DictConfig):
     nostalgia_cb = NostalgiaGradProjector(project_name_filter=["lora"])
     cb_list.append(nostalgia_cb)
 
-    trainer = Trainer(
-        max_epochs=cfg.train.epochs,
-        accelerator=cfg.train.accelerator,
-        devices=cfg.train.devices,
-        precision=cfg.train.precision,
-        logger=loggers,
-        callbacks=cb_list,
-        log_every_n_steps=cfg.train.log_every_n_steps,
-        val_check_interval=cfg.train.val_check_interval,
-        enable_progress_bar=True,
-        enable_model_summary=False,
-        num_sanity_val_steps=getattr(cfg.train, 'num_sanity_val_steps', 0),
-    )
-
     per_task_acc = []
+    # Allow per-task epoch overrides
+    epochs_per_task = list(getattr(cfg.train, 'epochs_per_task', []))
 
     for idx, ds_name in enumerate(tasks, start=1):
         task_id = f"task{idx}_{ds_name.lower()}"
         print(f"=== Task {idx}/{len(tasks)}: {ds_name} ===")
+
+        # Build a trainer for this task with task-specific epochs
+        task_epochs = epochs_per_task[idx - 1] if idx - 1 < len(epochs_per_task) and epochs_per_task[idx - 1] else cfg.train.epochs
+        trainer = Trainer(
+            max_epochs=task_epochs,
+            accelerator=cfg.train.accelerator,
+            devices=cfg.train.devices,
+            precision=cfg.train.precision,
+            logger=loggers,
+            callbacks=cb_list,
+            log_every_n_steps=cfg.train.log_every_n_steps,
+            val_check_interval=cfg.train.val_check_interval,
+            enable_progress_bar=True,
+            enable_model_summary=False,
+            num_sanity_val_steps=getattr(cfg.train, 'num_sanity_val_steps', 0),
+        )
 
         # Build loaders for this dataset (HF first, TV fallback)
         framework = cfg.model.get("framework", "hf")
@@ -154,7 +158,13 @@ def hydra_entry(cfg: DictConfig):
             nostalgia_cb.clear_basis()
 
         # Fit on this dataset
-        trainer.fit(model, train_loader, val_loader)
+    trainer.fit(model, train_loader, val_loader)
+
+    # Save a checkpoint at the end of this task
+    ckpt_dir = os.path.join(cfg.logger.save_dir, cfg.logger.name, "checkpoints")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, f"after_{task_id}-epoch{trainer.current_epoch:03d}.ckpt")
+    trainer.save_checkpoint(ckpt_path)
 
         # Record validation accuracy
         val_metrics = trainer.callback_metrics

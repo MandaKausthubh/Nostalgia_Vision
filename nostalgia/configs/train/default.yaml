@@ -1,4 +1,7 @@
 epochs: 50
+# Optional: set epochs per task; if empty or shorter than the number of tasks,
+# remaining tasks will use `epochs` above.
+epochs_per_task: []
 optimizer: adamw
 lr: 3e-4
 weight_decay: 0.05
