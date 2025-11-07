@@ -1,5 +1,5 @@
 import os
-from typing import Dict
+from typing import Dict, List, Optional
 import argparse
 import json
 import re
@@ -84,10 +84,28 @@ def hydra_entry(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
     set_seed(cfg.experiment.seed)
 
+    # Helpers to make CLI input robust across shells (e.g., zsh globbing)
+    def _parse_list_str(s: str) -> List[str]:
+        # Accept forms like "[a,b,c]" or "a,b,c" and trim whitespace
+        s = s.strip()
+        if s.startswith('[') and s.endswith(']'):
+            s = s[1:-1]
+        parts = [p.strip() for p in s.split(',') if p.strip()]
+        return parts
+
+    def _parse_list_int(s: str) -> List[int]:
+        return [int(x) for x in _parse_list_str(s)]
+
     # Multi-task sequences configuration
     # If cfg.experiment.tasks is provided, use that list of dataset names in order;
     # else, repeat cfg.dataset.name for num_tasks times (backward compatibility).
-    tasks = list(getattr(cfg.experiment, 'tasks', []))
+    raw_tasks = getattr(cfg.experiment, 'tasks', [])
+    if isinstance(raw_tasks, str):
+        tasks = _parse_list_str(raw_tasks)
+    elif isinstance(raw_tasks, (list, tuple)):
+        tasks = list(raw_tasks)
+    else:
+        tasks = []
     if not tasks:
         tasks = [cfg.dataset.name for _ in range(cfg.experiment.get('num_tasks', 2))]
 
@@ -113,15 +131,28 @@ def hydra_entry(cfg: DictConfig):
     cb_list.append(nostalgia_cb)
 
     per_task_acc = []
-    # Allow per-task epoch overrides
-    epochs_per_task = list(getattr(cfg.train, 'epochs_per_task', []))
+    # Allow per-task epoch overrides and accept string inputs
+    raw_ept = getattr(cfg.train, 'epochs_per_task', [])
+    if isinstance(raw_ept, str):
+        epochs_per_task: List[int] = _parse_list_int(raw_ept)
+    elif isinstance(raw_ept, (list, tuple)):
+        # Cast to int where possible
+        tmp: List[int] = []
+        for v in raw_ept:
+            try:
+                tmp.append(int(v))
+            except Exception:
+                pass
+        epochs_per_task = tmp
+    else:
+        epochs_per_task = []
 
     for idx, ds_name in enumerate(tasks, start=1):
         task_id = f"task{idx}_{ds_name.lower()}"
         print(f"=== Task {idx}/{len(tasks)}: {ds_name} ===")
 
         # Build a trainer for this task with task-specific epochs
-        task_epochs = epochs_per_task[idx - 1] if idx - 1 < len(epochs_per_task) and epochs_per_task[idx - 1] else cfg.train.epochs
+        task_epochs = epochs_per_task[idx - 1] if idx - 1 < len(epochs_per_task) else cfg.train.epochs
         trainer = Trainer(
             max_epochs=task_epochs,
             accelerator=cfg.train.accelerator,
@@ -146,7 +177,6 @@ def hydra_entry(cfg: DictConfig):
         # Add/switch head for this dataset (support expanding head if reusing same task id)
         if hasattr(model, 'add_task_head'):
             if hasattr(model, 'expand_task_head'):
-                # Create if missing, else expand in case the new dataset has more classes
                 model.add_task_head(task_id, n_classes)
                 model.expand_task_head(task_id, n_classes)
             else:
@@ -158,13 +188,13 @@ def hydra_entry(cfg: DictConfig):
             nostalgia_cb.clear_basis()
 
         # Fit on this dataset
-    trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader, val_loader)
 
-    # Save a checkpoint at the end of this task
-    ckpt_dir = os.path.join(cfg.logger.save_dir, cfg.logger.name, "checkpoints")
-    os.makedirs(ckpt_dir, exist_ok=True)
-    ckpt_path = os.path.join(ckpt_dir, f"after_{task_id}-epoch{trainer.current_epoch:03d}.ckpt")
-    trainer.save_checkpoint(ckpt_path)
+        # Save a checkpoint at the end of this task
+        ckpt_dir = os.path.join(cfg.logger.save_dir, cfg.logger.name, "checkpoints")
+        os.makedirs(ckpt_dir, exist_ok=True)
+        ckpt_path = os.path.join(ckpt_dir, f"after_{task_id}-epoch{trainer.current_epoch:03d}.ckpt")
+        trainer.save_checkpoint(ckpt_path)
 
         # Record validation accuracy
         val_metrics = trainer.callback_metrics
