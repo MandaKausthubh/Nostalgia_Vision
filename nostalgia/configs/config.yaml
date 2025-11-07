@@ -7,8 +7,8 @@ defaults:
   - _self_
 
 experiment:
-  # Auto name: <model>-<tasks-joined>
-  name: ${slug:${model.framework}}-${slug:${model.get:arch,${model.get:model_id,model}}}-${join:${experiment.tasks},-}
+  # Auto name: uses model framework and tasks (set manually for custom names)
+  name: exp_${slug:${model.framework}}_${join:${experiment.tasks},-}
   seed: 0
   num_tasks: 2
   # tasks: []  # list of dataset names for multi-task sequences (override from CLI)
