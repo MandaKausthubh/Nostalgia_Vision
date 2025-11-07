@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, ListConfig
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything, Trainer
 from pytorch_lightning.callbacks import Callback
@@ -102,7 +102,7 @@ def hydra_entry(cfg: DictConfig):
     raw_tasks = getattr(cfg.experiment, 'tasks', [])
     if isinstance(raw_tasks, str):
         tasks = _parse_list_str(raw_tasks)
-    elif isinstance(raw_tasks, (list, tuple)):
+    elif isinstance(raw_tasks, (list, tuple, ListConfig)):
         tasks = list(raw_tasks)
     else:
         tasks = []
@@ -135,8 +135,8 @@ def hydra_entry(cfg: DictConfig):
     raw_ept = getattr(cfg.train, 'epochs_per_task', [])
     if isinstance(raw_ept, str):
         epochs_per_task: List[int] = _parse_list_int(raw_ept)
-    elif isinstance(raw_ept, (list, tuple)):
-        # Cast to int where possible
+    elif isinstance(raw_ept, (list, tuple, ListConfig)):
+        # Cast to int where possible (handles list, tuple, and OmegaConf ListConfig)
         tmp: List[int] = []
         for v in raw_ept:
             try:
